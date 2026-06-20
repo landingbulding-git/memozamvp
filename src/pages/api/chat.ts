@@ -72,7 +72,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
     // First request to Claude
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-5-sonnet-20240620',
       max_tokens: 1024,
       messages: messages,
       tools: anthropicTools,
@@ -109,7 +109,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
           async start(controller) {
             try {
               const anthropicStream = await anthropic.messages.create({
-                model: 'claude-3-5-sonnet-20241022',
+                model: 'claude-3-5-sonnet-20240620',
                 max_tokens: 1024,
                 messages: finalMessages,
                 stream: true,
