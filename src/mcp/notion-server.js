@@ -14,6 +14,22 @@ const server = new Server({
   capabilities: { tools: {} },
 });
 
+// Extract title from any Notion object (page, database, or data_source)
+function extractTitle(item) {
+  // databases / data_sources have a top-level title array
+  if (item.title && Array.isArray(item.title)) {
+    return item.title.map(t => t.plain_text).join('') || '(untitled)';
+  }
+  // pages store the title inside properties
+  if (item.properties) {
+    const titleProp =
+      item.properties.title ??
+      Object.values(item.properties).find(p => p.type === 'title');
+    if (titleProp?.title) return titleProp.title.map(t => t.plain_text).join('') || '(untitled)';
+  }
+  return '(untitled)';
+}
+
 // Flatten a raw Notion property value into something readable for Claude
 function extractPropertyValue(prop) {
   switch (prop.type) {
@@ -157,64 +173,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     if (name === "list_all_databases") {
-      const found = new Map();
+      // Notion renamed "database" → "data_source" in their API.
+      // The unfiltered search returns both pages and data_sources — extract data_sources directly.
+      const allSearch = await notion.search({ query: '', page_size: 100 });
 
-      // Method 1: direct database search
-      try {
-        const dbSearch = await notion.search({
-          query: '',
-          filter: { property: 'object', value: 'database' },
-          page_size: 50,
-        });
-        for (const db of dbSearch.results) {
-          found.set(db.id, {
-            id: db.id,
-            title: db.title?.map(t => t.plain_text).join('') ?? '(untitled)',
-            url: db.url,
-          });
-        }
-      } catch (_) {}
+      const databases = allSearch.results
+        .filter(item => item.object === 'data_source' || item.object === 'database')
+        .map(item => ({
+          id: item.id,
+          title: extractTitle(item),
+          url: item.url ?? null,
+        }));
 
-      // Method 2: discover databases via parent references of accessible pages
-      // (OAuth often gives page access without exposing the parent DB in search)
-      try {
-        const pageSearch = await notion.search({ query: '', page_size: 100 });
-        const parentDbIds = [...new Set(
-          pageSearch.results
-            .filter(p => p.object === 'page' && p.parent?.type === 'database_id')
-            .map(p => p.parent.database_id)
-        )];
-        for (const dbId of parentDbIds) {
-          if (found.has(dbId)) continue;
-          try {
-            const db = await notion.databases.retrieve({ database_id: dbId });
-            found.set(dbId, {
-              id: db.id,
-              title: db.title?.map(t => t.plain_text).join('') ?? '(untitled)',
-              url: db.url,
-            });
-          } catch (_) {
-            found.set(dbId, { id: dbId, title: '(untitled database)', url: null });
-          }
-        }
-      } catch (_) {}
-
-      const databases = Array.from(found.values());
       console.error(`[MCP] list_all_databases → ${databases.length} database(s): ${databases.map(d => `"${d.title}"`).join(', ')}`);
       return { content: [{ type: "text", text: JSON.stringify(databases, null, 2) }] };
     }
 
     if (name === "search_notion") {
-      const response = await notion.search({ query: args.query, page_size: 10 });
-      const results = response.results.map(item => {
-        const title = item.object === 'database'
-          ? item.title?.map(t => t.plain_text).join('') ?? '(untitled)'
-          : item.properties?.title?.title?.map(t => t.plain_text).join('') ??
-            Object.values(item.properties ?? {}).find(p => p.type === 'title')?.title?.map(t => t.plain_text).join('') ??
-            '(untitled)';
-        return { id: item.id, url: item.url, type: item.object, title };
-      });
-      console.error(`[MCP] search_notion → ${results.length} result(s): ${results.map(r => `"${r.title}"`).join(', ')}`);
+      const response = await notion.search({ query: args.query, page_size: 20 });
+      const results = response.results.map(item => ({
+        id: item.id,
+        url: item.url,
+        type: item.object,
+        title: extractTitle(item),
+      }));
+      console.error(`[MCP] search_notion → ${results.length} result(s): ${results.map(r => `"${r.title}" (${r.type})`).join(', ')}`);
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
     }
 
