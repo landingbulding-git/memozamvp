@@ -173,14 +173,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     if (name === "list_all_databases") {
-      // Notion renamed "database" → "data_source" in their API.
-      // The unfiltered search returns both pages and data_sources — extract data_sources directly.
       const allSearch = await notion.search({ query: '', page_size: 100 });
+      const allResults = allSearch.results;
 
-      const databases = allSearch.results
+      // Notion uses two separate IDs:
+      //   data_source_id — ID of the object in search results
+      //   database_id    — different ID required for databases.query / databases.retrieve
+      // Build the mapping by reading parent references from accessible pages.
+      const dsIdToDbId = new Map();
+      for (const item of allResults) {
+        if (item.object === 'page' && item.parent?.type === 'data_source_id') {
+          dsIdToDbId.set(item.parent.data_source_id, item.parent.database_id);
+        }
+      }
+
+      const databases = allResults
         .filter(item => item.object === 'data_source' || item.object === 'database')
         .map(item => ({
-          id: item.id,
+          id: dsIdToDbId.get(item.id) ?? item.id,
           title: extractTitle(item),
           url: item.url ?? null,
         }));
@@ -191,10 +201,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "search_notion") {
       const response = await notion.search({ query: args.query, page_size: 20 });
-      const results = response.results.map(item => ({
-        id: item.id,
+      const allResults = response.results;
+
+      // Build data_source_id → database_id mapping from page parents
+      const dsIdToDbId = new Map();
+      for (const item of allResults) {
+        if (item.object === 'page' && item.parent?.type === 'data_source_id') {
+          dsIdToDbId.set(item.parent.data_source_id, item.parent.database_id);
+        }
+      }
+
+      const results = allResults.map(item => ({
+        id: item.object === 'data_source' ? (dsIdToDbId.get(item.id) ?? item.id) : item.id,
         url: item.url,
-        type: item.object,
+        type: item.object === 'data_source' ? 'database' : item.object,
         title: extractTitle(item),
       }));
       console.error(`[MCP] search_notion → ${results.length} result(s): ${results.map(r => `"${r.title}" (${r.type})`).join(', ')}`);

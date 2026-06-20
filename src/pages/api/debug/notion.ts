@@ -10,40 +10,29 @@ export const GET: APIRoute = async ({ cookies }) => {
   }
 
   const notion = new Client({ auth: token });
-
-  // Fetch everything in one call
-  const allSearch = await notion.search({ query: '', page_size: 100 }).catch(e => ({ results: [], error: e.message }));
-
+  const allSearch = await notion.search({ query: '', page_size: 100 }).catch((e: any) => ({ results: [], error: e.message }));
   const allResults = (allSearch as any).results ?? [];
 
-  const byType = allResults.reduce((acc: any, item: any) => {
-    acc[item.object] = (acc[item.object] ?? 0) + 1;
-    return acc;
-  }, {});
+  // Build data_source_id → database_id mapping
+  const dsIdToDbId = new Map<string, string>();
+  for (const item of allResults) {
+    if (item.object === 'page' && item.parent?.type === 'data_source_id') {
+      dsIdToDbId.set(item.parent.data_source_id, item.parent.database_id);
+    }
+  }
 
-  // Extract databases (data_source or database)
   const databases = allResults
     .filter((item: any) => item.object === 'data_source' || item.object === 'database')
     .map((item: any) => ({
-      id: item.id,
-      object: item.object,
+      data_source_id: item.id,
+      database_id: dsIdToDbId.get(item.id) ?? '(not found via pages)',
       title: item.title?.map((t: any) => t.plain_text).join('') ?? '(untitled)',
-      url: item.url,
     }));
 
-  // Sample parent types from pages
-  const parentTypes = [...new Set(
-    allResults
-      .filter((item: any) => item.object === 'page')
-      .map((item: any) => `${item.parent?.type} → ${JSON.stringify(item.parent)}`)
-      .slice(0, 5)
-  )];
-
   return new Response(JSON.stringify({
-    total: allResults.length,
-    by_type: byType,
+    total_items: allResults.length,
+    by_type: allResults.reduce((acc: any, i: any) => { acc[i.object] = (acc[i.object] ?? 0) + 1; return acc; }, {}),
     databases,
-    sample_page_parents: parentTypes,
   }, null, 2), {
     status: 200, headers: { 'Content-Type': 'application/json' },
   });
