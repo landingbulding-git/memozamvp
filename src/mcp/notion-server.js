@@ -79,12 +79,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     } 
 
     if (name === "query_database") {
-      const response = await notion.databases.query({
+      const queryParams = {
         database_id: args.database_id,
-        filter: args.filter,
-        sorts: args.sorts,
         page_size: 10,
-      });
+      };
+      if (args.filter && Object.keys(args.filter).length > 0) {
+        queryParams.filter = args.filter;
+      }
+      if (args.sorts && args.sorts.length > 0) {
+        queryParams.sorts = args.sorts;
+      }
+
+      const response = await notion.databases.query(queryParams);
       return {
         content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }],
       };
