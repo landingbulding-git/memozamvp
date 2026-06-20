@@ -66,6 +66,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
+        name: "get_current_user",
+        description: "Get the current authenticated user's name and Notion user ID. Use this when user identity is unknown and the user refers to 'me', 'my', or 'I'.",
+        inputSchema: { type: "object", properties: {}, required: [] },
+      },
+      {
         name: "list_all_databases",
         description: "List every Notion database the integration has access to. Call this first whenever you need to discover what databases exist in the workspace.",
         inputSchema: {
@@ -172,6 +177,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   console.error(`[MCP] Tool called: ${name}`, JSON.stringify(args));
 
   try {
+    if (name === "get_current_user") {
+      const me = await notion.users.me({});
+      const result = { id: me.id, name: me.name, type: me.type };
+      console.error(`[MCP] get_current_user → ${me.name} (${me.id})`);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+
     if (name === "list_all_databases") {
       const allSearch = await notion.search({ query: '', page_size: 100 });
       const allResults = allSearch.results;

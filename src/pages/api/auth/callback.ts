@@ -49,22 +49,21 @@ export const GET: APIRoute = async ({ request, cookies }) => {
 
     console.log('[AUTH_CALLBACK] Token exchange successful. Setting secure cookies...');
 
-    // Set secure HTTP-only cookies
-    cookies.set('notion_access_token', data.access_token, {
+    const cookieOpts = {
       path: '/',
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-    });
+      sameSite: 'lax' as const,
+      maxAge: 60 * 60 * 24 * 30,
+    };
 
-    cookies.set('notion_workspace_name', data.workspace_name, {
-      path: '/',
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-    });
+    cookies.set('notion_access_token', data.access_token, cookieOpts);
+    cookies.set('notion_workspace_name', data.workspace_name ?? '', cookieOpts);
+
+    const ownerUser = data.owner?.user;
+    if (ownerUser?.name) cookies.set('notion_user_name', ownerUser.name, cookieOpts);
+    if (ownerUser?.id)   cookies.set('notion_user_id',   ownerUser.id,   cookieOpts);
+    console.log(`[AUTH_CALLBACK] User: ${ownerUser?.name ?? 'unknown'} (${ownerUser?.id ?? 'no id'})`);
 
     console.log('[AUTH_CALLBACK] Redirecting back to root (/)');
     return new Response(null, {
