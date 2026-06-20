@@ -50,8 +50,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
+        name: "list_all_databases",
+        description: "List every Notion database the integration has access to. Call this first whenever you need to discover what databases exist in the workspace.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+      },
+      {
         name: "search_notion",
-        description: "Search across the user's Notion workspace pages and databases.",
+        description: "Search across the user's Notion workspace pages and databases by keyword.",
         inputSchema: {
           type: "object",
           properties: {
@@ -144,14 +153,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+  console.error(`[MCP] Tool called: ${name}`, JSON.stringify(args));
 
   try {
-    if (name === "search_notion") {
+    if (name === "list_all_databases") {
       const response = await notion.search({
-        query: args.query,
-        page_size: 10,
+        query: '',
+        filter: { property: 'object', value: 'database' },
+        page_size: 50,
       });
-      // Return just id, url, object type, and title for each result
+      const databases = response.results.map(db => ({
+        id: db.id,
+        title: db.title?.map(t => t.plain_text).join('') ?? '(untitled)',
+        url: db.url,
+      }));
+      console.error(`[MCP] list_all_databases → ${databases.length} database(s): ${databases.map(d => `"${d.title}"`).join(', ')}`);
+      return { content: [{ type: "text", text: JSON.stringify(databases, null, 2) }] };
+    }
+
+    if (name === "search_notion") {
+      const response = await notion.search({ query: args.query, page_size: 10 });
       const results = response.results.map(item => {
         const title = item.object === 'database'
           ? item.title?.map(t => t.plain_text).join('') ?? '(untitled)'
@@ -160,9 +181,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             '(untitled)';
         return { id: item.id, url: item.url, type: item.object, title };
       });
-      return {
-        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
-      };
+      console.error(`[MCP] search_notion → ${results.length} result(s): ${results.map(r => `"${r.title}"`).join(', ')}`);
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
     }
 
     if (name === "get_database_schema") {
@@ -174,38 +194,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (prop.type === 'status') entry.options = prop.status.options.map(o => o.name);
         return entry;
       });
-      return {
-        content: [{ type: "text", text: JSON.stringify(schema, null, 2) }],
-      };
+      console.error(`[MCP] get_database_schema → ${schema.length} properties: ${schema.map(p => p.name).join(', ')}`);
+      return { content: [{ type: "text", text: JSON.stringify(schema, null, 2) }] };
     }
 
     if (name === "query_database") {
       const queryParams = { database_id: args.database_id, page_size: 20 };
       if (args.filter && Object.keys(args.filter).length > 0) queryParams.filter = args.filter;
       if (args.sorts && args.sorts.length > 0) queryParams.sorts = args.sorts;
-
       const response = await notion.databases.query(queryParams);
       const cleaned = response.results.map(cleanPage);
-      return {
-        content: [{ type: "text", text: JSON.stringify(cleaned, null, 2) }],
-      };
+      console.error(`[MCP] query_database → ${cleaned.length} record(s)`);
+      return { content: [{ type: "text", text: JSON.stringify(cleaned, null, 2) }] };
     }
 
     if (name === "get_page") {
       const page = await notion.pages.retrieve({ page_id: args.page_id });
-      return {
-        content: [{ type: "text", text: JSON.stringify(cleanPage(page), null, 2) }],
-      };
+      const cleaned = cleanPage(page);
+      console.error(`[MCP] get_page → id: ${cleaned.id}`);
+      return { content: [{ type: "text", text: JSON.stringify(cleaned, null, 2) }] };
     }
 
     if (name === "update_page_properties") {
-      const response = await notion.pages.update({
-        page_id: args.page_id,
-        properties: args.properties,
-      });
-      return {
-        content: [{ type: "text", text: JSON.stringify({ success: true, id: response.id, url: response.url }, null, 2) }],
-      };
+      const response = await notion.pages.update({ page_id: args.page_id, properties: args.properties });
+      console.error(`[MCP] update_page_properties → OK id: ${response.id}`);
+      return { content: [{ type: "text", text: JSON.stringify({ success: true, id: response.id, url: response.url }, null, 2) }] };
     }
 
     if (name === "create_page") {
@@ -219,22 +232,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
 
       const children = args.content ? [
-        {
-          object: "block",
-          paragraph: {
-            rich_text: [{ text: { content: args.content } }],
-          },
-        },
+        { object: "block", paragraph: { rich_text: [{ text: { content: args.content } }] } },
       ] : [];
 
       const response = await notion.pages.create({ parent, properties, children });
-      return {
-        content: [{ type: "text", text: JSON.stringify({ success: true, id: response.id, url: response.url }, null, 2) }],
-      };
+      console.error(`[MCP] create_page → OK id: ${response.id} url: ${response.url}`);
+      return { content: [{ type: "text", text: JSON.stringify({ success: true, id: response.id, url: response.url }, null, 2) }] };
     }
 
     throw new Error(`Unknown tool: ${name}`);
   } catch (error) {
+    console.error(`[MCP] ERROR in ${name}:`, error.message);
     return {
       content: [{ type: "text", text: `Notion API Error: ${error.message}` }],
       isError: true,
