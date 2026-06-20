@@ -34,14 +34,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "create_page",
-        description: "Create a new page or task in Notion.",
+        description: "Create a new page or task in Notion. You must provide a parent_id.",
         inputSchema: {
           type: "object",
           properties: {
             title: { type: "string", description: "The title of the new page." },
-            content: { type: "string", description: "The text content of the page." }
+            content: { type: "string", description: "The text content of the page." },
+            parent_id: { type: "string", description: "The ID of the parent page or database." },
+            parent_type: { type: "string", enum: ["page", "database"], description: "Whether the parent is a page or a database." }
           },
-          required: ["title", "content"],
+          required: ["title", "content", "parent_id", "parent_type"],
         },
       }
     ],
@@ -64,18 +66,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     } 
     
     if (name === "create_page") {
-      // NOTE: This requires a parent page ID to create a page in Notion.
-      // For this MVP, if no PARENT_PAGE_ID is provided in env, it might fail.
-      // We will assume process.env.NOTION_PARENT_PAGE_ID is set.
-      if (!process.env.NOTION_PARENT_PAGE_ID) {
-          return {
-             content: [{ type: "text", text: "Error: NOTION_PARENT_PAGE_ID environment variable is missing. Cannot create page." }],
-             isError: true,
-          }
-      }
+      const parent = args.parent_type === "database" 
+        ? { database_id: args.parent_id } 
+        : { page_id: args.parent_id };
 
       const response = await notion.pages.create({
-        parent: { page_id: process.env.NOTION_PARENT_PAGE_ID },
+        parent: parent,
         properties: {
           title: {
             title: [{ text: { content: args.title } }],
