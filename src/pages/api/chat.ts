@@ -10,6 +10,15 @@ const anthropic = new Anthropic({
   apiKey: import.meta.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY,
 });
 
+const SYSTEM_PROMPT = `You are Memoza, a Notion assistant. Keep responses brief, clear, and direct. No jargon.
+
+Rules:
+- When referencing a specific Notion page, database, or block, always include its direct URL as a markdown link, e.g. [Page Title](https://notion.so/...)
+- When you create, update, or delete something in Notion, finish with a short summary of what changed and a direct link to the affected page formatted as [Open in Notion →](url)
+- Use simple markdown: **bold** for key terms, bullet points for lists
+- No filler phrases ("Sure!", "Of course!", "Great question!")
+- If something isn't found or an error occurs, say so plainly in one sentence`;
+
 async function getMcpClient(userNotionToken: string) {
   const serverPath = path.resolve(process.cwd(), 'src/mcp/notion-server.js');
 
@@ -56,6 +65,9 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       return new Response(JSON.stringify({ error: 'Messages array is required' }), { status: 400 });
     }
 
+    console.log("=== INCOMING MESSAGES FROM FRONTEND ===");
+    console.log(JSON.stringify(messages, null, 2));
+
     // Initialize MCP client specifically for this request using the user's token
     const { mcpClient, transport } = await getMcpClient(session.notion_access_token);
     activeTransport = transport;
@@ -70,38 +82,59 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       input_schema: tool.inputSchema,
     }));
 
+    console.log("=== SENDING TO ANTHROPIC (FIRST CALL) ===");
+
     // First request to Claude
     const response = await anthropic.messages.create({
       model: 'claude-3-5-haiku-latest',
-      max_tokens: 1024,
+      max_tokens: 2048,
+      system: SYSTEM_PROMPT,
       messages: messages,
       tools: anthropicTools,
     });
+
+    console.log("=== RESPONSE FROM ANTHROPIC ===");
+    console.log(JSON.stringify(response, null, 2));
 
     let finalMessages = [...messages];
     finalMessages.push({ role: 'assistant', content: response.content });
 
     // Check if Claude wants to call a tool
     if (response.stop_reason === 'tool_use') {
-      const toolUseBlock = response.content.find(block => block.type === 'tool_use');
-      if (toolUseBlock && toolUseBlock.type === 'tool_use') {
-        // Execute the tool via MCP
-        const mcpResult = await activeMcpClient.callTool({
-          name: toolUseBlock.name,
-          arguments: toolUseBlock.input as Record<string, any>,
-        });
+      const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
+      
+      if (toolUseBlocks.length > 0) {
+        const toolResults = [];
 
-        // Add the tool result to the messages array
+        // Execute all requested tools
+        for (const block of toolUseBlocks) {
+          if (block.type === 'tool_use') {
+            let mcpResult;
+            try {
+              mcpResult = await activeMcpClient.callTool({
+                name: block.name,
+                arguments: block.input as Record<string, any>,
+              });
+            } catch (err: any) {
+              mcpResult = {
+                content: [{ type: "text", text: `Error executing tool: ${err.message}` }],
+                isError: true,
+              };
+            }
+
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: typeof mcpResult.content === 'string' ? mcpResult.content : JSON.stringify(mcpResult.content),
+              is_error: mcpResult.isError || false,
+            });
+          }
+        }
+
+        // Add all tool results to the messages array as a single user message
         finalMessages.push({
           role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: toolUseBlock.id,
-              content: mcpResult.content as any,
-              is_error: mcpResult.isError,
-            }
-          ]
+          content: toolResults as any,
         });
 
         // Set up SSE stream for the final response after tool execution
@@ -110,7 +143,8 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             try {
               const anthropicStream = await anthropic.messages.create({
                 model: 'claude-3-5-haiku-latest',
-                max_tokens: 1024,
+                max_tokens: 2048,
+                system: SYSTEM_PROMPT,
                 messages: finalMessages,
                 stream: true,
               });
