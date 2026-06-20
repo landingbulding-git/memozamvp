@@ -1,6 +1,4 @@
 import type { APIRoute } from 'astro';
-import db from '../../../db/index';
-import { nanoid } from 'nanoid';
 
 export const GET: APIRoute = async ({ request, cookies }) => {
   console.log('[AUTH_CALLBACK] Received callback request');
@@ -49,35 +47,18 @@ export const GET: APIRoute = async ({ request, cookies }) => {
       return new Response(`Failed to authenticate with Notion: ${JSON.stringify(data)}`, { status: 500 });
     }
 
-    console.log('[AUTH_CALLBACK] Token exchange successful. Payload:', { 
-      bot_id: data.bot_id, 
-      workspace_name: data.workspace_name,
-      owner_user_name: data.owner?.user?.name 
-    }); // Log partially to avoid leaking the token itself
+    console.log('[AUTH_CALLBACK] Token exchange successful. Setting secure cookies...');
 
-    const sessionId = nanoid();
-    const ownerUser = data.owner?.user;
+    // Set secure HTTP-only cookies
+    cookies.set('notion_access_token', data.access_token, {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+    });
 
-    // Save to local SQLite database
-    console.log(`[AUTH_CALLBACK] Saving new session to database with ID: ${sessionId}`);
-    const insert = db.prepare(`
-      INSERT INTO sessions (id, notion_access_token, notion_bot_id, notion_workspace_name, notion_user_name, notion_user_id)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    insert.run(
-      sessionId,
-      data.access_token,
-      data.bot_id,
-      data.workspace_name,
-      ownerUser?.name ?? null,
-      ownerUser?.id ?? null,
-    );
-    console.log('[AUTH_CALLBACK] Database save successful.');
-
-    // Set a session cookie
-    console.log('[AUTH_CALLBACK] Setting memoza_session cookie...');
-    cookies.set('memoza_session', sessionId, {
+    cookies.set('notion_workspace_name', data.workspace_name, {
       path: '/',
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -86,7 +67,6 @@ export const GET: APIRoute = async ({ request, cookies }) => {
     });
 
     console.log('[AUTH_CALLBACK] Redirecting back to root (/)');
-    // Redirect back to the chat interface
     return new Response(null, {
       status: 302,
       headers: {

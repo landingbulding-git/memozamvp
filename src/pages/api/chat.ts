@@ -3,20 +3,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import path from 'path';
-import db from '../../db/index';
 
 const anthropic = new Anthropic({
   apiKey: import.meta.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY,
 });
 
-function buildSystemPrompt(userName: string | null, userId: string | null): string {
-  const identity = userName
-    ? `The current user's name is "${userName}" and their Notion user ID is "${userId}". When the user says "me", "my", or "I", they refer to this person.`
-    : `The current user's Notion identity is unknown.`;
-
+function buildSystemPrompt(): string {
   return `You are Memoza, a Notion assistant. Keep responses brief, clear, and direct. No jargon.
-
-${identity}
 
 Tool usage rules:
 - To find pages or databases: use search_notion.
@@ -25,17 +18,14 @@ Tool usage rules:
 - To read a single record's current properties: use get_page with its page ID.
 - To update properties on an existing record: use update_page_properties with the page ID and a properties object in Notion API format.
 - To create a new record: if parent_id is unknown, search_notion first, then create_page.
-- To filter by the current user (e.g. "assigned to me", "my tasks"): use their Notion user ID "${userId ?? 'unknown'}" in a people filter.
 - Notion filter syntax:
   - date:        { "property": "Due Date", "date": { "is_not_empty": true } }
   - select:      { "property": "Status", "select": { "equals": "Done" } }
-  - people:      { "property": "Executor", "people": { "contains": "<user_id>" } }
   - rich_text:   { "property": "Name", "rich_text": { "contains": "keyword" } }
 - Notion sort syntax: [{ "property": "Due Date", "direction": "ascending" }]
 - update_page_properties format by type:
   - select/status: { "Status": { "select": { "name": "Done" } } }
   - date:          { "Due Date": { "date": { "start": "2024-01-15" } } }
-  - people:        { "Assignee": { "people": [{ "id": "<user_id>" }] } }
   - checkbox:      { "Done": { "checkbox": true } }
   - rich_text:     { "Notes": { "rich_text": [{ "text": { "content": "text" } }] } }
   - title:         { "Name": { "title": [{ "text": { "content": "New name" } }] } }
@@ -77,20 +67,10 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   let activeMcpClient: Client | null = null;
   
   try {
-    const sessionId = cookies.get('memoza_session')?.value;
-    if (!sessionId) {
+    const notionToken = cookies.get('notion_access_token')?.value;
+
+    if (!notionToken) {
       return new Response(JSON.stringify({ error: 'Unauthorized. Please connect your Notion account first.' }), { status: 401 });
-    }
-
-    const stmt = db.prepare('SELECT notion_access_token, notion_user_name, notion_user_id FROM sessions WHERE id = ?');
-    const session = stmt.get(sessionId) as {
-      notion_access_token: string;
-      notion_user_name: string | null;
-      notion_user_id: string | null;
-    } | undefined;
-
-    if (!session || !session.notion_access_token) {
-      return new Response(JSON.stringify({ error: 'Invalid session or missing Notion token.' }), { status: 401 });
     }
 
     const { messages } = await request.json();
@@ -99,9 +79,9 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       return new Response(JSON.stringify({ error: 'Messages array is required' }), { status: 400 });
     }
 
-    const systemPrompt = buildSystemPrompt(session.notion_user_name, session.notion_user_id);
+    const systemPrompt = buildSystemPrompt();
 
-    const { mcpClient, transport } = await getMcpClient(session.notion_access_token);
+    const { mcpClient, transport } = await getMcpClient(notionToken);
     activeTransport = transport;
     activeMcpClient = mcpClient;
 
