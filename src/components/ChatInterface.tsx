@@ -4,7 +4,21 @@ const ChatInterface = () => {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [authStatus, setAuthStatus] = useState<{ checked: boolean; authenticated: boolean; workspace?: string }>({ checked: false, authenticated: false });
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Check authentication status
+    fetch('/api/user/status')
+      .then(res => res.json())
+      .then(data => {
+        setAuthStatus({ checked: true, authenticated: data.authenticated, workspace: data.workspace });
+      })
+      .catch(err => {
+        console.error("Failed to check auth status", err);
+        setAuthStatus({ checked: true, authenticated: false });
+      });
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -30,6 +44,11 @@ const ChatInterface = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: updatedMessages }),
       });
+
+      if (response.status === 401) {
+          setAuthStatus({ checked: true, authenticated: false });
+          throw new Error("Unauthorized. Please connect your Notion account.");
+      }
 
       if (!response.ok) throw new Error(await response.text());
 
@@ -64,9 +83,9 @@ const ChatInterface = () => {
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to send message:', error);
-      setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error processing your request.' }]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${error.message || 'I encountered an error processing your request.'}` }]);
     } finally {
       setIsLoading(false);
     }
@@ -77,6 +96,10 @@ const ChatInterface = () => {
       handleSubmit();
     }
   };
+
+  if (!authStatus.checked) {
+      return <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-900">Loading...</div>;
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
@@ -100,7 +123,14 @@ const ChatInterface = () => {
         </div>
         
         <div className="border-t pt-4 space-y-2 text-sm text-gray-600">
-          <div className="hover:bg-gray-100 p-2 rounded cursor-pointer">Settings</div>
+          {authStatus.authenticated ? (
+              <div className="p-2 rounded flex items-center justify-between">
+                  <span className="truncate w-32">{authStatus.workspace} Notion</span>
+                  <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+              </div>
+          ) : (
+              <a href="/api/auth/notion" className="block text-center hover:bg-gray-100 p-2 rounded cursor-pointer text-indigo-600 font-medium">Connect Notion</a>
+          )}
         </div>
       </aside>
 
@@ -112,26 +142,34 @@ const ChatInterface = () => {
               <h2 className="text-4xl font-medium tracking-tight">Ask and create tasks for your meetings</h2>
               
               {/* Prompt Area */}
-              <div className="bg-white border border-gray-200 shadow-sm rounded-2xl p-2 flex items-center">
-                <button className="p-2 text-gray-400">+</button>
-                <input
-                  type="text"
-                  className="flex-1 p-2 bg-transparent outline-none text-gray-900"
-                  placeholder="What would you like to know?"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  disabled={isLoading}
-                />
-                <button className="p-2 text-gray-400">🎤</button>
-                <button 
-                  className={`p-2 rounded-lg text-white ${isLoading || !input.trim() ? 'bg-indigo-300' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                  onClick={() => handleSubmit()}
-                  disabled={isLoading || !input.trim()}
-                >
-                  ➜
-                </button>
-              </div>
+              {authStatus.authenticated ? (
+                <div className="bg-white border border-gray-200 shadow-sm rounded-2xl p-2 flex items-center">
+                  <button className="p-2 text-gray-400">+</button>
+                  <input
+                    type="text"
+                    className="flex-1 p-2 bg-transparent outline-none text-gray-900"
+                    placeholder="What would you like to know?"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    disabled={isLoading}
+                  />
+                  <button className="p-2 text-gray-400">🎤</button>
+                  <button 
+                    className={`p-2 rounded-lg text-white ${isLoading || !input.trim() ? 'bg-indigo-300' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                    onClick={() => handleSubmit()}
+                    disabled={isLoading || !input.trim()}
+                  >
+                    ➜
+                  </button>
+                </div>
+              ) : (
+                <div className="flex justify-center mt-8">
+                    <a href="/api/auth/notion" className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow-sm">
+                        Connect Notion to Start
+                    </a>
+                </div>
+              )}
 
               {/* Quick Actions */}
               <div className="flex justify-center gap-2">
