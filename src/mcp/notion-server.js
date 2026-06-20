@@ -33,6 +33,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "query_database",
+        description: "Query a specific Notion database to retrieve its records. You can optionally provide filter and sorts objects according to the Notion API syntax.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            database_id: { type: "string", description: "The ID of the database to query." },
+            filter: { type: "object", description: "Optional filter object (Notion API format)." },
+            sorts: { type: "array", description: "Optional sorts array (Notion API format)." }
+          },
+          required: ["database_id"],
+        },
+      },
+      {
         name: "create_page",
         description: "Create a new page or task in Notion. You must provide a parent_id.",
         inputSchema: {
@@ -59,6 +72,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const response = await notion.search({
         query: args.query,
         page_size: 5,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }],
+      };
+    } 
+
+    if (name === "query_database") {
+      const response = await notion.databases.query({
+        database_id: args.database_id,
+        filter: args.filter,
+        sorts: args.sorts,
+        page_size: 10,
       });
       return {
         content: [{ type: "text", text: JSON.stringify(response.results, null, 2) }],
