@@ -9,16 +9,45 @@ const anthropic = new Anthropic({
   apiKey: import.meta.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY,
 });
 
-const SYSTEM_PROMPT = `You are Memoza, a Notion assistant. Keep responses brief, clear, and direct. No jargon.
+function buildSystemPrompt(userName: string | null, userId: string | null): string {
+  const identity = userName
+    ? `The current user's name is "${userName}" and their Notion user ID is "${userId}". When the user says "me", "my", or "I", they refer to this person.`
+    : `The current user's Notion identity is unknown.`;
 
-Rules:
-- When referencing a specific Notion page, database, or block, always include its direct URL as a markdown link, e.g. [Page Title](https://notion.so/...)
-- When you create, update, or delete something in Notion, finish with a short summary of what changed and a direct link to the affected page formatted as [Open in Notion →](url)
-- If a user asks you to create a page or task and you do not know the target parent_id, you MUST first use the search_notion tool to find an appropriate database (like "Tasks") or page to use as the parent_id. Determine if it is a "page" or "database" for the parent_type.
-- If a user asks you to find specific records within a database (e.g. "find tasks with the closest deadline"), first find the database using search_notion, then use query_database with the found database_id. You can provide sorts and filters in the query_database tool.
+  return `You are Memoza, a Notion assistant. Keep responses brief, clear, and direct. No jargon.
+
+${identity}
+
+Tool usage rules:
+- To find pages or databases: use search_notion.
+- To read or edit records in a database: ALWAYS call get_database_schema first to confirm exact property names and types.
+- To query records: call query_database. Results include page IDs needed for get_page and update_page_properties.
+- To read a single record's current properties: use get_page with its page ID.
+- To update properties on an existing record: use update_page_properties with the page ID and a properties object in Notion API format.
+- To create a new record: if parent_id is unknown, search_notion first, then create_page.
+- To filter by the current user (e.g. "assigned to me", "my tasks"): use their Notion user ID "${userId ?? 'unknown'}" in a people filter.
+- Notion filter syntax:
+  - date:        { "property": "Due Date", "date": { "is_not_empty": true } }
+  - select:      { "property": "Status", "select": { "equals": "Done" } }
+  - people:      { "property": "Executor", "people": { "contains": "<user_id>" } }
+  - rich_text:   { "property": "Name", "rich_text": { "contains": "keyword" } }
+- Notion sort syntax: [{ "property": "Due Date", "direction": "ascending" }]
+- update_page_properties format by type:
+  - select/status: { "Status": { "select": { "name": "Done" } } }
+  - date:          { "Due Date": { "date": { "start": "2024-01-15" } } }
+  - people:        { "Assignee": { "people": [{ "id": "<user_id>" }] } }
+  - checkbox:      { "Done": { "checkbox": true } }
+  - rich_text:     { "Notes": { "rich_text": [{ "text": { "content": "text" } }] } }
+  - title:         { "Name": { "title": [{ "text": { "content": "New name" } }] } }
+
+Response rules:
+- Never narrate tool calls or describe what you are about to do. Only output the final answer.
+- When referencing a Notion page, always include its direct URL as a markdown link: [Page Title](https://notion.so/...)
+- When you create, update, or delete something, end with a short summary and [Open in Notion →](url)
 - Use simple markdown: **bold** for key terms, bullet points for lists
 - No filler phrases ("Sure!", "Of course!", "Great question!")
-- If something isn't found or an error occurs, say so plainly in one sentence`;
+- If something isn't found or an error occurs, say so in one sentence`;
+}
 
 async function getMcpClient(userNotionToken: string) {
   const serverPath = path.resolve(process.cwd(), 'src/mcp/notion-server.js');
@@ -53,8 +82,12 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       return new Response(JSON.stringify({ error: 'Unauthorized. Please connect your Notion account first.' }), { status: 401 });
     }
 
-    const stmt = db.prepare('SELECT notion_access_token FROM sessions WHERE id = ?');
-    const session = stmt.get(sessionId) as { notion_access_token: string } | undefined;
+    const stmt = db.prepare('SELECT notion_access_token, notion_user_name, notion_user_id FROM sessions WHERE id = ?');
+    const session = stmt.get(sessionId) as {
+      notion_access_token: string;
+      notion_user_name: string | null;
+      notion_user_id: string | null;
+    } | undefined;
 
     if (!session || !session.notion_access_token) {
       return new Response(JSON.stringify({ error: 'Invalid session or missing Notion token.' }), { status: 401 });
@@ -65,6 +98,8 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     if (!messages || !Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: 'Messages array is required' }), { status: 400 });
     }
+
+    const systemPrompt = buildSystemPrompt(session.notion_user_name, session.notion_user_id);
 
     const { mcpClient, transport } = await getMcpClient(session.notion_access_token);
     activeTransport = transport;
@@ -83,27 +118,21 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         try {
           let finalMessages = [...messages];
           let isDone = false;
-          
+
           while (!isDone) {
             const response = await anthropic.messages.create({
               model: 'claude-haiku-4-5-20251001',
               max_tokens: 2048,
-              system: SYSTEM_PROMPT,
+              system: systemPrompt,
               messages: finalMessages,
               tools: anthropicTools,
             });
-            
+
             finalMessages.push({ role: 'assistant', content: response.content });
-            
-            // Stream any text blocks back to the user immediately
-            const textBlocks = response.content.filter(block => block.type === 'text');
-            for (const block of textBlocks) {
-              if (block.type === 'text') {
-                controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ text: block.text + '\n' })}\n\n`));
-              }
-            }
 
             if (response.stop_reason === 'tool_use') {
+              // Intermediate step — suppress any text, it's internal narration
+
               const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
               const toolResults = [];
 
@@ -131,13 +160,15 @@ export const POST: APIRoute = async ({ request, cookies }) => {
                 }
               }
 
-              finalMessages.push({
-                role: 'user',
-                content: toolResults as any,
-              });
-              // The loop will continue, passing the tool_results back to Claude in the next iteration.
+              finalMessages.push({ role: 'user', content: toolResults as any });
             } else {
-              // Claude has finished responding.
+              // Final response — stream all text blocks to the user
+              const textBlocks = response.content.filter(block => block.type === 'text');
+              for (const block of textBlocks) {
+                if (block.type === 'text') {
+                  controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ text: block.text })}\n\n`));
+                }
+              }
               isDone = true;
             }
           }

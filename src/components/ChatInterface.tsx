@@ -185,6 +185,16 @@ const ChatInterface = () => {
     }
   };
 
+  const handleSignOut = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      setAuthStatus({ checked: true, authenticated: false });
+      setMessages([]);
+    } catch (err) {
+      console.error('Failed to sign out', err);
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') handleSubmit();
   };
@@ -222,9 +232,17 @@ const ChatInterface = () => {
 
         <div className="border-t pt-4 text-sm">
           {authStatus.authenticated ? (
-            <div className="px-2 py-1.5 flex items-center justify-between text-gray-600">
-              <span className="truncate">{authStatus.workspace}</span>
-              <span className="w-2 h-2 bg-green-500 rounded-full ml-2 shrink-0" />
+            <div className="space-y-2">
+              <div className="px-2 py-1.5 flex items-center justify-between text-gray-600">
+                <span className="truncate">{authStatus.workspace}</span>
+                <span className="w-2 h-2 bg-green-500 rounded-full ml-2 shrink-0" />
+              </div>
+              <button
+                onClick={handleSignOut}
+                className="w-full text-left text-red-600 font-medium hover:text-red-700 px-2 py-1.5 transition-colors"
+              >
+                Sign out
+              </button>
             </div>
           ) : (
             <a
