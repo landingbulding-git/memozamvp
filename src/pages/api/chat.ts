@@ -121,7 +121,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             console.log(`[CHAT] Claude call #${iteration}...`);
 
             const response = await anthropic.messages.create({
-              model: 'claude-haiku-4-5-20251001',
+              model: 'claude-sonnet-4-6',
               max_tokens: 2048,
               system: systemPrompt,
               messages: finalMessages,
