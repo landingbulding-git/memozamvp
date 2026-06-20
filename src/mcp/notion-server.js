@@ -157,16 +157,49 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     if (name === "list_all_databases") {
-      const response = await notion.search({
-        query: '',
-        filter: { property: 'object', value: 'database' },
-        page_size: 50,
-      });
-      const databases = response.results.map(db => ({
-        id: db.id,
-        title: db.title?.map(t => t.plain_text).join('') ?? '(untitled)',
-        url: db.url,
-      }));
+      const found = new Map();
+
+      // Method 1: direct database search
+      try {
+        const dbSearch = await notion.search({
+          query: '',
+          filter: { property: 'object', value: 'database' },
+          page_size: 50,
+        });
+        for (const db of dbSearch.results) {
+          found.set(db.id, {
+            id: db.id,
+            title: db.title?.map(t => t.plain_text).join('') ?? '(untitled)',
+            url: db.url,
+          });
+        }
+      } catch (_) {}
+
+      // Method 2: discover databases via parent references of accessible pages
+      // (OAuth often gives page access without exposing the parent DB in search)
+      try {
+        const pageSearch = await notion.search({ query: '', page_size: 100 });
+        const parentDbIds = [...new Set(
+          pageSearch.results
+            .filter(p => p.object === 'page' && p.parent?.type === 'database_id')
+            .map(p => p.parent.database_id)
+        )];
+        for (const dbId of parentDbIds) {
+          if (found.has(dbId)) continue;
+          try {
+            const db = await notion.databases.retrieve({ database_id: dbId });
+            found.set(dbId, {
+              id: db.id,
+              title: db.title?.map(t => t.plain_text).join('') ?? '(untitled)',
+              url: db.url,
+            });
+          } catch (_) {
+            found.set(dbId, { id: dbId, title: '(untitled database)', url: null });
+          }
+        }
+      } catch (_) {}
+
+      const databases = Array.from(found.values());
       console.error(`[MCP] list_all_databases → ${databases.length} database(s): ${databases.map(d => `"${d.title}"`).join(', ')}`);
       return { content: [{ type: "text", text: JSON.stringify(databases, null, 2) }] };
     }
