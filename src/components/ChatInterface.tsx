@@ -102,21 +102,15 @@ const ChatInterface = () => {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [authStatus, setAuthStatus] = useState<{ checked: boolean; authenticated: boolean; workspace?: string }>({
-    checked: false,
-    authenticated: false,
-  });
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch('/api/user/status')
-      .then((res) => res.json())
-      .then((data) => {
-        setAuthStatus({ checked: true, authenticated: data.authenticated, workspace: data.workspace });
-      })
-      .catch(() => {
-        setAuthStatus({ checked: true, authenticated: false });
-      });
+    const email = document.cookie
+      .split('; ')
+      .find(row => row.startsWith('user_email='))
+      ?.split('=')[1];
+    setUserEmail(email || null);
   }, []);
 
   useEffect(() => {
@@ -140,7 +134,6 @@ const ChatInterface = () => {
       });
 
       if (response.status === 401) {
-        setAuthStatus({ checked: true, authenticated: false });
         throw new Error('Please verify your database connection.');
       }
 
@@ -188,8 +181,7 @@ const ChatInterface = () => {
   const handleSignOut = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      setAuthStatus({ checked: true, authenticated: false });
-      setMessages([]);
+      window.location.href = '/login';
     } catch (err) {
       console.error('Failed to sign out', err);
     }
@@ -198,14 +190,6 @@ const ChatInterface = () => {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') handleSubmit();
   };
-
-  if (!authStatus.checked) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-400 text-sm">
-        Loading...
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
@@ -231,27 +215,18 @@ const ChatInterface = () => {
         </div>
 
         <div className="border-t pt-4 text-sm">
-          {authStatus.authenticated ? (
-            <div className="space-y-2">
-              <div className="px-2 py-1.5 flex items-center justify-between text-gray-600">
-                <span className="truncate">{authStatus.workspace}</span>
-                <span className="w-2 h-2 bg-green-500 rounded-full ml-2 shrink-0" />
-              </div>
-              <button
-                onClick={handleSignOut}
-                className="w-full text-left text-red-600 font-medium hover:text-red-700 px-2 py-1.5 transition-colors"
-              >
-                Sign out
-              </button>
+          <div className="space-y-2">
+            <div className="px-2 py-1.5 flex items-center justify-between text-gray-600">
+              <span className="truncate text-xs">{userEmail}</span>
+              <span className="w-2 h-2 bg-green-500 rounded-full ml-2 shrink-0" />
             </div>
-          ) : (
-            <a
-              href="/api/auth/notion"
-              className="block text-center text-indigo-600 font-medium hover:text-indigo-700 px-2 py-1.5"
+            <button
+              onClick={handleSignOut}
+              className="w-full text-left text-red-600 font-medium hover:text-red-700 px-2 py-1.5 transition-colors text-xs"
             >
-              Connect Notion
-            </a>
-          )}
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -261,34 +236,25 @@ const ChatInterface = () => {
           /* Empty state */
           <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto">
             <div className="w-full max-w-2xl text-center space-y-8">
-              <h2 className="text-3xl font-medium tracking-tight">Ask anything about your Notion</h2>
+              <h2 className="text-3xl font-medium tracking-tight">Manage your meetings</h2>
 
-              {authStatus.authenticated ? (
-                <InputBar
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  onSubmit={handleSubmit}
-                  disabled={isLoading}
-                  placeholder="What would you like to know?"
-                />
-              ) : (
-                <a
-                  href="/api/auth/notion"
-                  className="inline-block px-6 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition"
-                >
-                  Connect Notion to Start
-                </a>
-              )}
+              <InputBar
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onSubmit={handleSubmit}
+                disabled={isLoading}
+                placeholder="What would you like to know?"
+              />
 
               <div className="text-left pt-4">
                 <p className="text-sm font-medium text-gray-500 mb-3">Try asking</p>
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { title: 'Meeting Audit', desc: 'Analyze your recent meetings' },
-                    { title: 'Action Items', desc: 'Extract tasks from a meeting page' },
-                    { title: 'Find a Page', desc: 'Search across your workspace' },
-                    { title: 'Create a Record', desc: 'Add a new entry to a database' },
+                    { title: 'List Meetings', desc: 'Show all meetings' },
+                    { title: 'Create Meeting', desc: 'Add a new meeting' },
+                    { title: 'Action Items', desc: 'Show open tasks' },
+                    { title: 'Sample Data', desc: 'Create sample meeting' },
                   ].map((t) => (
                     <button
                       key={t.title}

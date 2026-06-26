@@ -1,6 +1,12 @@
 ---
 import ChatInterface from '../components/ChatInterface.tsx';
 import Layout from '../layouts/Layout.astro';
+
+const accessToken = Astro.cookies.get('access_token')?.value;
+
+if (!accessToken) {
+	return Astro.redirect('/login');
+}
 ---
 
 <Layout>

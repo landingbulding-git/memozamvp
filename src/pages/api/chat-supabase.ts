@@ -10,9 +10,9 @@ const anthropic = new Anthropic({
 const supabaseUrl = 'https://toahjjxmxesdbpwzgehx.supabase.co';
 const supabaseKey = process.env.SUPABASE_API_KEY;
 
-function buildSystemPrompt(userName: string | null, userId: string | null): string {
-  const userLine = userName
-    ? `The current user is **${userName}**, user ID: \`${userId}\`.`
+function buildSystemPrompt(userEmail: string | null): string {
+  const userLine = userEmail
+    ? `The current user is **${userEmail}** (superadmin role).`
     : `User identity unknown.`;
 
   return `You are Memoza, a meeting & task management assistant connected to a Supabase database.
@@ -249,6 +249,11 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   console.log('[CHAT-SUPABASE] ── New request ──────────────────────────');
 
   try {
+    const accessToken = cookies.get('access_token')?.value;
+    if (!accessToken) {
+      return new Response(JSON.stringify({ error: 'Not authenticated' }), { status: 401 });
+    }
+
     if (!supabaseKey) {
       return new Response(JSON.stringify({ error: 'SUPABASE_API_KEY not configured' }), { status: 500 });
     }
@@ -263,11 +268,10 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     const lastUserMsg = messages.filter((m: any) => m.role === 'user').at(-1)?.content ?? '';
     console.log(`[CHAT-SUPABASE] User message: "${lastUserMsg}"`);
 
-    const userName = cookies.get('user_name')?.value ?? null;
-    const userId = cookies.get('user_id')?.value ?? null;
-    console.log(`[CHAT-SUPABASE] User: ${userName ?? 'unknown'}`);
+    const userEmail = cookies.get('user_email')?.value ?? null;
+    console.log(`[CHAT-SUPABASE] User: ${userEmail ?? 'unknown'}`);
 
-    const systemPrompt = buildSystemPrompt(userName, userId);
+    const systemPrompt = buildSystemPrompt(userEmail);
     const tools = getSupabaseTools();
 
     const anthropicTools = tools.map(tool => ({
