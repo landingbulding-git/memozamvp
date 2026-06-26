@@ -73,6 +73,65 @@ function getSupabaseTools() {
         },
       },
     },
+    {
+      name: 'create_meeting',
+      description: 'Create a new meeting',
+      input_schema: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string', description: 'Meeting subject' },
+          location: { type: 'string', description: 'Meeting location (e.g., "Conference Room A" or "Zoom")' },
+          meeting_date: { type: 'string', description: 'Meeting date (YYYY-MM-DD format)' },
+          created_by: { type: 'string', description: 'Who created this meeting' },
+        },
+        required: ['subject', 'meeting_date', 'created_by'],
+      },
+    },
+    {
+      name: 'create_topic',
+      description: 'Create a topic/section for a meeting',
+      input_schema: {
+        type: 'object',
+        properties: {
+          meeting_id: { type: 'number', description: 'Meeting ID' },
+          section_number: { type: 'number', description: 'Section order number' },
+          name_hu: { type: 'string', description: 'Topic name in Hungarian' },
+          name_en: { type: 'string', description: 'Topic name in English' },
+        },
+        required: ['meeting_id', 'section_number', 'name_hu', 'name_en'],
+      },
+    },
+    {
+      name: 'create_item',
+      description: 'Create an issue item (task, incident, or info)',
+      input_schema: {
+        type: 'object',
+        properties: {
+          meeting_id: { type: 'number', description: 'Meeting ID' },
+          topic_id: { type: 'number', description: 'Topic ID (optional)' },
+          item_type: { type: 'string', enum: ['task', 'incident', 'info'], description: 'Type of item' },
+          content_hu: { type: 'string', description: 'Content in Hungarian' },
+          content_en: { type: 'string', description: 'Content in English' },
+          deadline_raw: { type: 'string', description: 'Raw deadline text (e.g., "December 23")' },
+          deadline_date: { type: 'string', description: 'Parsed deadline date (YYYY-MM-DD format, optional)' },
+          responsible_raw: { type: 'string', description: 'Responsible person name' },
+          status: { type: 'string', enum: ['open', 'in_progress', 'closed'], description: 'Item status' },
+        },
+        required: ['meeting_id', 'item_type', 'content_hu', 'content_en', 'responsible_raw', 'status'],
+      },
+    },
+    {
+      name: 'update_item_status',
+      description: 'Update the status of an issue item',
+      input_schema: {
+        type: 'object',
+        properties: {
+          item_id: { type: 'number', description: 'Issue item ID' },
+          status: { type: 'string', enum: ['open', 'in_progress', 'closed'], description: 'New status' },
+        },
+        required: ['item_id', 'status'],
+      },
+    },
   ];
 }
 
@@ -115,6 +174,69 @@ async function executeSupabaseTool(
       const { data, error } = await query;
       if (error) throw error;
       return JSON.stringify(data || []);
+    }
+
+    if (toolName === 'create_meeting') {
+      const { data, error } = await supabase
+        .from('meetings')
+        .insert({
+          subject: input.subject,
+          location: input.location || null,
+          meeting_date: input.meeting_date,
+          created_by: input.created_by,
+        })
+        .select();
+
+      if (error) throw error;
+      return JSON.stringify({ success: true, meeting: data?.[0] });
+    }
+
+    if (toolName === 'create_topic') {
+      const { data, error } = await supabase
+        .from('topics')
+        .insert({
+          meeting_id: input.meeting_id,
+          section_number: input.section_number,
+          name_hu: input.name_hu,
+          name_en: input.name_en,
+        })
+        .select();
+
+      if (error) throw error;
+      return JSON.stringify({ success: true, topic: data?.[0] });
+    }
+
+    if (toolName === 'create_item') {
+      const { data, error } = await supabase
+        .from('issue_items')
+        .insert({
+          meeting_id: input.meeting_id,
+          topic_id: input.topic_id || null,
+          item_type: input.item_type,
+          content_hu: input.content_hu,
+          content_en: input.content_en,
+          deadline_raw: input.deadline_raw || null,
+          deadline_date: input.deadline_date || null,
+          responsible_raw: input.responsible_raw,
+          status: input.status,
+          notice_hu: input.notice_hu || null,
+          notice_en: input.notice_en || null,
+        })
+        .select();
+
+      if (error) throw error;
+      return JSON.stringify({ success: true, item: data?.[0] });
+    }
+
+    if (toolName === 'update_item_status') {
+      const { data, error } = await supabase
+        .from('issue_items')
+        .update({ status: input.status })
+        .eq('id', input.item_id)
+        .select();
+
+      if (error) throw error;
+      return JSON.stringify({ success: true, item: data?.[0] });
     }
 
     return JSON.stringify({ error: 'Unknown tool' });
