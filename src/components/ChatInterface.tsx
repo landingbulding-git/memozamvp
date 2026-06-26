@@ -133,7 +133,7 @@ const ChatInterface = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch('/api/chat-supabase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: updatedMessages }),
@@ -141,7 +141,7 @@ const ChatInterface = () => {
 
       if (response.status === 401) {
         setAuthStatus({ checked: true, authenticated: false });
-        throw new Error('Please connect your Notion account to continue.');
+        throw new Error('Please verify your database connection.');
       }
 
       if (!response.ok) throw new Error(await response.text());
